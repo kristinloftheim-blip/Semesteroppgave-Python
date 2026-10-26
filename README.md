@@ -1,4 +1,19 @@
 # Semesteroppgave-Python
+Oppgave utdeling
+
+1: Kristin
+
+2: Erik
+
+3: Filip
+
+4: Nikolai
+
+5: Thomas
+
+6: Sergiusz
+
+
 Forslag til forbedringer
 (Dere står fritt til å velge hvilke forbedringer dere ønsker å implementere.)
 
