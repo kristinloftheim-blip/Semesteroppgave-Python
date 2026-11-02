@@ -1,5 +1,6 @@
 import math
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.widgets import RadioButtons
 from matplotlib.patches import FancyBboxPatch, Circle
@@ -26,16 +27,12 @@ def lat_lon_to_merc(lat, lon):
     r = 6378137.0
     return r * math.radians(lon), r * math.log(math.tan(math.pi / 4 + math.radians(lat) / 2))
 
-places = {
-    'Sentrum': (60.3929, 5.3241), 'Sandviken': (60.4110, 5.3230), 'Åsane': (60.4660, 5.3250),
-    'Laksevåg': (60.3870, 5.2900), 'Fyllingsdalen': (60.3510, 5.2880), 'Loddefjord': (60.3630, 5.2370),
-    'Landås': (60.3700, 5.3530), 'Paradis': (60.3390, 5.3420), 'Nesttun': (60.3193, 5.3540),
-    'Fana': (60.2620, 5.3400), 'Ytrebygda': (60.2950, 5.2400), 'Arna': (60.4209, 5.4704),
-}
-places_merc = {name: lat_lon_to_merc(*pos) for name, pos in places.items()}
+places = pd.read_csv('Semester26_Steder.csv')
+places_merc = [(row.navn, lat_lon_to_merc(row.lat, row.lon)) for row in places.itertuples()]
 
 def nearest_place(mx, my):
-    return min(places_merc, key=lambda name: math.dist(places_merc[name], (mx, my)))
+    name, pos = min(places_merc, key=lambda place: math.dist(place[1], (mx, my)))
+    return name
 
 def fmt(value):
     return f"{value:,.0f}".replace(",", " ")
@@ -122,7 +119,7 @@ standard_types = {
 house_type = 1
 standard_type = 1
 m2 = 100
-marked_point = lat_lon_to_merc(*places['Sentrum'])
+marked_point = lat_lon_to_merc(60.39253, 5.32337)
 
 BLUE, LIGHT_BLUE = '#1e9bf0', '#c9e6fc'
 TEXT, MUTED, LINE, BORDER = '#1f2933', '#7b8794', '#e4e7eb', '#d0d5db'
