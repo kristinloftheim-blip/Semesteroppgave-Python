@@ -1,38 +1,112 @@
-# importing modules and packages
+import math
+import sys
+import ctypes
+import tkinter as tk
+import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.widgets import RadioButtons
+from matplotlib.widgets import RadioButtons, Button
+from matplotlib.patches import FancyBboxPatch, Circle
 import matplotlib.image as mpimg
-from Semester26_Model import  predict_price
+from Semester26_Model import predict_price
+
+MAP_FILE = 'Semester26_Bergen_kart.jpg'
+LOGO_FILE = 'Semester26_Logo.png'
+ICON_FILE = 'Semester26_Ikon.png'
+MAP_EXTENT = (546060.5, 676038.0, 8443625.0, 8522539.9)
+MERC_TO_MODEL = [[0.001804877605, -0.0001861719251],
+                 [0.0002655721006, 0.001261065026],
+                 [-3282.516912, -10533.85722]]
+
+def merc_to_model(mx, my):
+    (a, b), (c, d), (e, f) = MERC_TO_MODEL
+    return a * mx + c * my + e, b * mx + d * my + f
+
+def is_inside_model(x, y):
+    return 0 <= x <= 100 and 4.8 <= y <= 100
+
+def is_inside_model_grid(x, y):
+    return (x >= 0) & (x <= 100) & (y >= 4.8) & (y <= 100)
+
+def lat_lon_to_merc(lat, lon):
+    r = 6378137.0
+    return r * math.radians(lon), r * math.log(math.tan(math.pi / 4 + math.radians(lat) / 2))
+
+places = pd.read_csv('Semester26_Steder.csv')
+places_merc = [(row.navn, lat_lon_to_merc(row.lat, row.lon)) for row in places.itertuples()]
+
+def nearest_place(mx, my):
+    name, pos = min(places_merc, key=lambda place: math.dist(place[1], (mx, my)))
+    return name
+
+def fmt(value):
+    return f"{value:,.0f}".replace(",", " ")
 
 def draw_the_map():
-    ax_map.cla()
-    ax_map.imshow(img, extent=(0, 100, 0, 100), aspect='auto')
-    x,y = marked_point
-    ax_map.scatter(x, y, marker='+', c='blue', s=200)
-    print(f"marked_point: {marked_point}")
-    if marked_point == (0, 0):
+    mx, my = marked_point
+    x, y = merc_to_model(mx, my)
+    marker.set_offsets([[mx, my]])
+    halo.center = (mx, my)
+    popup.xy = (mx, my)
+
+    house_name = [k for k, v in house_types.items() if v == house_type][0]
+    standard_name = [k for k, v in standard_types.items() if v == standard_type][0]
+    txt_choice.set_text(f"{house_name} · {standard_name} standard · {m2} m²")
+    txt_total_label.set_text(f"Totalpris ({m2} m²)")
+    txt_coords.set_text(f"x {x:.0f}, y {y:.0f}")
+    print(f"marked_point: ({x:.1f}, {y:.1f})")
+
+    ax_bars.cla()
+    if not is_inside_model(x, y):
+        popup.set_text("Utenfor området\nKlikk innenfor kartet")
+        txt_price.set_text("–")
+        txt_area.set_text("Utenfor modellområdet")
+        txt_total.set_text("–")
+        style_bars()
+        fig.canvas.draw_idle()
         return
 
-    m2_price:float = predict_price(x, y, m2, house_type, standard_type) / m2
-    price = f"{round(m2_price * 1000, -2):,.0f}"
+    kr_m2 = predict_price(x, y, m2, house_type, standard_type) / m2 * 1000
+    area = nearest_place(mx, my)
+    popup.set_text(f"{area}\n{fmt(round(kr_m2, -2))} kr/m²")
+    txt_price.set_text(f"{fmt(round(kr_m2, -2))} kr/m²")
+    txt_area.set_text(area)
+    txt_total.set_text(f"{kr_m2 * m2 / 1e6:.1f}".replace(".", ",") + " mill. kr")
 
-    m2list = [50,100,150,200]
-    price_m2 = [predict_price(x, y,  _m2, house_type, standard_type)/_m2 for _m2 in m2list]
+    price_m2 = [predict_price(x, y, _m2, house_type, standard_type) / _m2 * 1000 for _m2 in m2list]
+    colors = [theme['accent'] if _m2 == m2 else theme['accent_soft'] for _m2 in m2list]
+    bars = ax_bars.bar([f"{_m2} m²" for _m2 in m2list], price_m2, color=colors, width=0.55)
+    ax_bars.bar_label(bars, labels=[f"{p / 1000:.0f}k" for p in price_m2], fontsize=9, color=theme['text'], padding=3)
+    ax_bars.set_ylim(0, max(price_m2) * 1.2)
+    style_bars()
+    fig.canvas.draw_idle()
 
-    ax_map.text(x + 3, y - 1, price, color='blue', fontsize=15)
-    ax_history.cla()
-    ax_history.bar(m2list, price_m2, color='blue', width=5)
-    ax_history.legend(["pris per m2"])
+def style_bars():
+    ax_bars.set_facecolor(theme['surface'])
+    ax_bars.set_yticks([])
+    ax_bars.tick_params(axis='x', length=0, labelsize=9, colors=theme['muted'])
+    for side in ('top', 'right', 'left'):
+        ax_bars.spines[side].set_visible(False)
+    ax_bars.spines['bottom'].set_color(theme['line'])
 
-    plt.draw()
-
-def on_click_map(event) :
+def on_click_map(event):
     global marked_point
     if event.inaxes != ax_map:
         return
+    fx, fy = fig.transFigure.inverted().transform((event.x, event.y))
+    if L <= fx <= L + W and B <= fy <= B + H:
+        return
     marked_point = (event.xdata, event.ydata)
     draw_the_map()
-    return
+
+def on_click_bars(event):
+    global m2
+    if event.inaxes != ax_bars or event.xdata is None:
+        return
+    index = round(event.xdata)
+    if 0 <= index < len(m2list):
+        m2 = m2list[index]
+        draw_the_map()
 
 def on_house_type(key):
     global house_type
@@ -46,44 +120,178 @@ def on_standard(key):
 
 house_types = {
     'Enebolig': 1,
-    'Rekke': 2,
+    'Rekkehus': 2,
     'Leilighet': 3
 }
 standard_types = {
     'Dårlig': 1,
     'God': 2,
-    'Meget God': 3,
+    'Meget god': 3,
     'Luksus': 4
 }
 
 house_type = 1
 standard_type = 1
 m2 = 100
-marked_point = (43,57)
+m2list = [50, 100, 150, 200]
+marked_point = lat_lon_to_merc(60.39253, 5.32337)
 
-# Create the figures
-fig = plt.figure(figsize=(8.0, 8.0),facecolor='lightgray')  # type: ignore[arg-type]
-fig.suptitle("Hus priser Bergen (per m2)", fontsize=20, y=0.95)
+THEMES = {
+    'light': {'surface': '#ffffff', 'text': '#1f2933', 'muted': '#7b8794', 'line': '#e4e7eb',
+              'border': '#d0d5db', 'accent': '#1e9bf0', 'accent_soft': '#c9e6fc', 'hover': '#f0f2f5',
+              'veil': (1, 1, 1), 'dim_inside': 0.0, 'dim_outside': 0.6, 'shadow': 0.08},
+    'dark': {'surface': '#1f2630', 'text': '#e6e9ee', 'muted': '#9aa5b1', 'line': '#323b47',
+             'border': '#3a4452', 'accent': '#3aa8f5', 'accent_soft': '#2b4560', 'hover': '#2a323d',
+             'veil': (0, 0, 0), 'dim_inside': 0.12, 'dim_outside': 0.6, 'shadow': 0.35},
+}
+theme_name = 'light'
+theme = THEMES[theme_name]
+themed = []
 
-ax_map = fig.add_axes((0.4, 0.05, 0.50, .85))
-ax_radio_house_type = fig.add_axes((0.05, 0.75, 0.30, .15))
-ax_radio_standard = fig.add_axes((0.05, 0.57, 0.30, .15))
-ax_history = fig.add_axes((0.05, 0.05, 0.30, .50))
-ax_radio_house_type.set_facecolor('lightgray')
-ax_radio_standard.set_facecolor('lightgray')
+def themed_artist(artist, method, role):
+    themed.append((artist, method, role))
+    return artist
 
-radio_button_category = RadioButtons(ax_radio_house_type, list(house_types.keys()))
-radio_button_standard = RadioButtons(ax_radio_standard, list(standard_types.keys()))
+plt.rcParams['font.family'] = ['Segoe UI', 'DejaVu Sans']
+plt.rcParams['toolbar'] = 'None'
+
+if sys.platform == 'win32':
+    
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Semesteroppgave.BoligpriserBergen')
+
+fig = plt.figure(figsize=(12.0, 7.3))
+fig.canvas.manager.set_window_title("Boligpriser Bergen")
+window = getattr(fig.canvas.manager, 'window', None)
+if isinstance(window, tk.Tk):
+    app_icon = tk.PhotoImage(master=window, file=ICON_FILE)
+    app_icon_small = app_icon.subsample(8)
+    window.iconphoto(False, app_icon, app_icon_small)
+
+ax_map = fig.add_axes((0, 0, 1, 1))
+img = mpimg.imread(MAP_FILE)
+ax_map.imshow(img, extent=MAP_EXTENT, interpolation='antialiased')
+ax_map.axis('off')
+
+gx, gy = np.meshgrid(np.linspace(MAP_EXTENT[0], MAP_EXTENT[1], 900),
+                     np.linspace(MAP_EXTENT[2], MAP_EXTENT[3], 550))
+model_x, model_y = merc_to_model(gx, gy)
+outside_model = ~is_inside_model_grid(model_x, model_y)
+veil = np.ones((*gx.shape, 4))
+veil_image = ax_map.imshow(veil, extent=MAP_EXTENT, origin='lower', interpolation='bilinear', zorder=1)
+ax_map.set_xlim(MAP_EXTENT[0], MAP_EXTENT[1])
+ax_map.set_ylim(MAP_EXTENT[2], MAP_EXTENT[3])
+themed_artist(fig.text(0.006, 0.01, "© Kartverket", fontsize=7), 'set_color', 'muted')
+
+halo = themed_artist(Circle(marked_point, 1800, alpha=0.15, lw=1, zorder=2), 'set_color', 'accent')
+ax_map.add_patch(halo)
+marker = themed_artist(ax_map.scatter(*marked_point, s=140, edgecolors='white', linewidths=2.5, zorder=3),
+                       'set_facecolor', 'accent')
+popup = ax_map.annotate("", marked_point, xytext=(24, -8), textcoords='offset points', va='top',
+                        fontsize=11, zorder=4, linespacing=1.6, bbox=dict(boxstyle='round,pad=0.7', lw=1))
+themed_artist(popup, 'set_color', 'text')
+themed_artist(popup.get_bbox_patch(), 'set_facecolor', 'surface')
+themed_artist(popup.get_bbox_patch(), 'set_edgecolor', 'border')
+
+ax_top = fig.add_axes((0, 0.935, 1, 0.065))
+ax_top.axis('off')
+top_bar = ax_top.add_patch(FancyBboxPatch((0, 0), 1, 1, boxstyle='square', ec='none', transform=ax_top.transAxes))
+themed_artist(top_bar, 'set_facecolor', 'surface')
+themed_artist(ax_top.plot([0, 1], [0, 0], lw=1, transform=ax_top.transAxes)[0], 'set_color', 'line')
+ax_logo = fig.add_axes((0.017, 0.9613, 0.0249, 0.022))
+ax_logo.imshow(mpimg.imread(LOGO_FILE), interpolation='antialiased')
+ax_logo.axis('off')
+themed_artist(ax_top.text(0.048, 0.5, "BOLIGPRISER BERGEN", fontsize=12, weight='bold', va='center',
+                          transform=ax_top.transAxes), 'set_color', 'text')
+themed_artist(ax_top.text(0.5, 0.5, "Klikk på kartet for å estimere boligpris", fontsize=10, ha='center', va='center',
+                          transform=ax_top.transAxes), 'set_color', 'muted')
+themed_artist(ax_top.text(0.872, 0.5, "DAT · Semesteroppgave 2026", fontsize=9, va='center', ha='right',
+                          transform=ax_top.transAxes), 'set_color', 'muted')
+
+ax_theme = fig.add_axes((0.882, 0.948, 0.103, 0.04))
+button_theme = Button(ax_theme, "")
+button_theme.label.set_fontsize(9.5)
+for spine in ax_theme.spines.values():
+    themed_artist(spine, 'set_edgecolor', 'border')
+
+L, B, W, H = 0.725, 0.035, 0.255, 0.87
+card_shadow = FancyBboxPatch((L + 0.002, B - 0.004), W, H, boxstyle='round,pad=0,rounding_size=0.01',
+                             transform=fig.transFigure, fc='black', ec='none', zorder=5)
+card = FancyBboxPatch((L, B), W, H, boxstyle='round,pad=0,rounding_size=0.01',
+                      transform=fig.transFigure, lw=1, zorder=6)
+fig.patches += [card_shadow, card]
+themed_artist(card, 'set_facecolor', 'surface')
+themed_artist(card, 'set_edgecolor', 'border')
+
+def card_line(y):
+    line = plt.Line2D([L, L + W], [y, y], lw=1, zorder=7)
+    fig.add_artist(themed_artist(line, 'set_color', 'line'))
+
+def card_text(x, y, s, role, **kwargs):
+    return themed_artist(fig.text(x, y, s, zorder=7, **kwargs), 'set_color', role)
+
+card_text(L + W / 2, 0.855, "Prisoversikt", 'text', ha='center', fontsize=13, weight='bold')
+txt_price = card_text(L + W / 2, 0.78, "", 'accent', ha='center', fontsize=22, weight='bold')
+txt_choice = card_text(L + W / 2, 0.75, "", 'muted', ha='center', fontsize=9)
+card_line(0.73)
+fig.text(L + 0.02, 0.70, "●", fontsize=9, color='#2ecc71', zorder=7)
+txt_area = card_text(L + 0.037, 0.70, "", 'text', fontsize=10.5)
+txt_coords = card_text(L + W - 0.02, 0.70, "", 'muted', ha='right', fontsize=9)
+card_line(0.68)
+txt_total_label = card_text(L + 0.02, 0.65, "", 'muted', fontsize=9.5)
+txt_total = card_text(L + W - 0.02, 0.65, "", 'text', ha='right', fontsize=11.5, weight='bold')
+card_line(0.63)
+card_text(L + 0.02, 0.60, "Boligtype", 'muted', fontsize=9.5)
+card_text(L + W / 2 + 0.01, 0.60, "Standard", 'muted', fontsize=9.5)
+
+ax_radio_house_type = fig.add_axes((L + 0.01, 0.465, W / 2 - 0.01, 0.125))
+ax_radio_standard = fig.add_axes((L + W / 2, 0.435, W / 2 - 0.01, 0.155))
+for ax in (ax_radio_house_type, ax_radio_standard):
+    ax.set_zorder(8)
+    themed_artist(ax, 'set_facecolor', 'surface')
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+radio_button_category = RadioButtons(ax_radio_house_type, list(house_types.keys()),
+                                     radio_props={'s': [80] * len(house_types), 'edgecolor': '#9aa5b1'})
+radio_button_standard = RadioButtons(ax_radio_standard, list(standard_types.keys()),
+                                     radio_props={'s': [80] * len(standard_types), 'edgecolor': '#9aa5b1'})
+for radio in (radio_button_category, radio_button_standard):
+    for label in radio.labels:
+        label.set_fontsize(10)
+        themed_artist(label, 'set_color', 'text')
 radio_button_category.on_clicked(on_house_type)
 radio_button_standard.on_clicked(on_standard)
+card_line(0.425)
 
-fig.subplots_adjust(left=0, right=1, top=1, bottom=0) # Adjust the figure to fit the image
-ax_map.margins(x=0.01, y=0.01)  # Adjust x and y margins
-img = mpimg.imread('Semester26_Bergen.jpg')
-ax_map.imshow(img, aspect='auto')
+card_text(L + 0.02, 0.39, "Pris per m² etter størrelse (klikk for å velge)", 'muted', fontsize=9.5)
+ax_bars = fig.add_axes((L + 0.02, 0.075, W - 0.04, 0.29))
+ax_bars.set_zorder(8)
 
-draw_the_map()
-plt.connect('button_press_event', on_click_map)
+def apply_theme():
+    for artist, method, role in themed:
+        getattr(artist, method)(theme[role])
+    fig.set_facecolor(theme['surface'])
+    card_shadow.set_alpha(theme['shadow'])
+    veil[..., :3] = theme['veil']
+    veil[..., 3] = np.where(outside_model, theme['dim_outside'], theme['dim_inside'])
+    veil_image.set_data(veil)
+    for radio in (radio_button_category, radio_button_standard):
+        radio.activecolor = theme['accent']
+    button_theme.label.set_text("☀  Lys modus" if theme_name == 'dark' else "☾  Mørk modus")
+    button_theme.label.set_color(theme['text'])
+    button_theme.color, button_theme.hovercolor = theme['surface'], theme['hover']
+    ax_theme.set_facecolor(theme['surface'])
+    draw_the_map()
+
+def on_toggle_theme(event):
+    global theme_name, theme
+    theme_name = 'dark' if theme_name == 'light' else 'light'
+    theme = THEMES[theme_name]
+    apply_theme()
+
+button_theme.on_clicked(on_toggle_theme)
+
+apply_theme()
+fig.canvas.mpl_connect('button_press_event', on_click_map)
+fig.canvas.mpl_connect('button_press_event', on_click_bars)
 plt.show()
-
-
