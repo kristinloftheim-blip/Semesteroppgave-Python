@@ -2,7 +2,7 @@ import math
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.widgets import RadioButtons
+from matplotlib.widgets import RadioButtons, Button
 from matplotlib.patches import FancyBboxPatch, Circle
 import matplotlib.image as mpimg
 from Semester26_Model import predict_price
@@ -47,6 +47,7 @@ def draw_the_map():
     house_name = [k for k, v in house_types.items() if v == house_type][0]
     standard_name = [k for k, v in standard_types.items() if v == standard_type][0]
     txt_choice.set_text(f"{house_name} · {standard_name} standard · {m2} m²")
+    txt_total_label.set_text(f"Totalpris ({m2} m²)")
     txt_coords.set_text(f"x {x:.0f}, y {y:.0f}")
     print(f"marked_point: ({x:.1f}, {y:.1f})")
 
@@ -67,22 +68,21 @@ def draw_the_map():
     txt_area.set_text(area)
     txt_total.set_text(f"{kr_m2 * m2 / 1e6:.1f}".replace(".", ",") + " mill. kr")
 
-    m2list = [50, 100, 150, 200]
     price_m2 = [predict_price(x, y, _m2, house_type, standard_type) / _m2 * 1000 for _m2 in m2list]
-    colors = [BLUE if _m2 == m2 else LIGHT_BLUE for _m2 in m2list]
+    colors = [theme['accent'] if _m2 == m2 else theme['accent_soft'] for _m2 in m2list]
     bars = ax_bars.bar([f"{_m2} m²" for _m2 in m2list], price_m2, color=colors, width=0.55)
-    ax_bars.bar_label(bars, labels=[f"{p / 1000:.0f}k" for p in price_m2], fontsize=9, color=TEXT, padding=3)
+    ax_bars.bar_label(bars, labels=[f"{p / 1000:.0f}k" for p in price_m2], fontsize=9, color=theme['text'], padding=3)
     ax_bars.set_ylim(0, max(price_m2) * 1.2)
     style_bars()
     fig.canvas.draw_idle()
 
 def style_bars():
-    ax_bars.set_facecolor('white')
+    ax_bars.set_facecolor(theme['surface'])
     ax_bars.set_yticks([])
-    ax_bars.tick_params(axis='x', length=0, labelsize=9, colors=MUTED)
+    ax_bars.tick_params(axis='x', length=0, labelsize=9, colors=theme['muted'])
     for side in ('top', 'right', 'left'):
         ax_bars.spines[side].set_visible(False)
-    ax_bars.spines['bottom'].set_color(LINE)
+    ax_bars.spines['bottom'].set_color(theme['line'])
 
 def on_click_map(event):
     global marked_point
@@ -93,6 +93,15 @@ def on_click_map(event):
         return
     marked_point = (event.xdata, event.ydata)
     draw_the_map()
+
+def on_click_bars(event):
+    global m2
+    if event.inaxes != ax_bars or event.xdata is None:
+        return
+    index = round(event.xdata)
+    if 0 <= index < len(m2list):
+        m2 = m2list[index]
+        draw_the_map()
 
 def on_house_type(key):
     global house_type
@@ -119,14 +128,29 @@ standard_types = {
 house_type = 1
 standard_type = 1
 m2 = 100
+m2list = [50, 100, 150, 200]
 marked_point = lat_lon_to_merc(60.39253, 5.32337)
 
-BLUE, LIGHT_BLUE = '#1e9bf0', '#c9e6fc'
-TEXT, MUTED, LINE, BORDER = '#1f2933', '#7b8794', '#e4e7eb', '#d0d5db'
+THEMES = {
+    'light': {'surface': '#ffffff', 'text': '#1f2933', 'muted': '#7b8794', 'line': '#e4e7eb',
+              'border': '#d0d5db', 'accent': '#1e9bf0', 'accent_soft': '#c9e6fc', 'hover': '#f0f2f5',
+              'veil': (1, 1, 1), 'dim_inside': 0.0, 'dim_outside': 0.6, 'shadow': 0.08},
+    'dark': {'surface': '#1f2630', 'text': '#e6e9ee', 'muted': '#9aa5b1', 'line': '#323b47',
+             'border': '#3a4452', 'accent': '#3aa8f5', 'accent_soft': '#2b4560', 'hover': '#2a323d',
+             'veil': (0, 0, 0), 'dim_inside': 0.12, 'dim_outside': 0.6, 'shadow': 0.35},
+}
+theme_name = 'light'
+theme = THEMES[theme_name]
+themed = []
+
+def themed_artist(artist, method, role):
+    themed.append((artist, method, role))
+    return artist
+
 plt.rcParams['font.family'] = ['Segoe UI', 'DejaVu Sans']
 plt.rcParams['toolbar'] = 'None'
 
-fig = plt.figure(figsize=(12.0, 7.3), facecolor='white')
+fig = plt.figure(figsize=(12.0, 7.3))
 fig.canvas.manager.set_window_title("Boligpriser Bergen")
 
 ax_map = fig.add_axes((0, 0, 1, 1))
@@ -134,84 +158,124 @@ img = mpimg.imread(MAP_FILE)
 ax_map.imshow(img, extent=MAP_EXTENT, interpolation='antialiased')
 ax_map.axis('off')
 
-gx, gy = np.meshgrid(np.linspace(MAP_EXTENT[0], MAP_EXTENT[1], 300),
-                     np.linspace(MAP_EXTENT[2], MAP_EXTENT[3], 200))
+gx, gy = np.meshgrid(np.linspace(MAP_EXTENT[0], MAP_EXTENT[1], 900),
+                     np.linspace(MAP_EXTENT[2], MAP_EXTENT[3], 550))
 model_x, model_y = merc_to_model(gx, gy)
+outside_model = ~is_inside_model_grid(model_x, model_y)
 veil = np.ones((*gx.shape, 4))
-veil[..., 3] = ~is_inside_model_grid(model_x, model_y) * 0.6
-ax_map.imshow(veil, extent=MAP_EXTENT, origin='lower', interpolation='bilinear', zorder=1)
+veil_image = ax_map.imshow(veil, extent=MAP_EXTENT, origin='lower', interpolation='bilinear', zorder=1)
 ax_map.set_xlim(MAP_EXTENT[0], MAP_EXTENT[1])
 ax_map.set_ylim(MAP_EXTENT[2], MAP_EXTENT[3])
-fig.text(0.006, 0.01, "© Kartverket", fontsize=7, color=MUTED)
+themed_artist(fig.text(0.006, 0.01, "© Kartverket", fontsize=7), 'set_color', 'muted')
 
-halo = Circle(marked_point, 1800, fc=BLUE, alpha=0.15, ec=BLUE, lw=1, zorder=2)
+halo = themed_artist(Circle(marked_point, 1800, alpha=0.15, lw=1, zorder=2), 'set_color', 'accent')
 ax_map.add_patch(halo)
-marker = ax_map.scatter(*marked_point, s=140, c=BLUE, edgecolors='white', linewidths=2.5, zorder=3)
+marker = themed_artist(ax_map.scatter(*marked_point, s=140, edgecolors='white', linewidths=2.5, zorder=3),
+                       'set_facecolor', 'accent')
 popup = ax_map.annotate("", marked_point, xytext=(24, -8), textcoords='offset points', va='top',
-                        fontsize=11, color=TEXT, zorder=4, linespacing=1.6,
-                        bbox=dict(boxstyle='round,pad=0.7', fc='white', ec=BORDER, lw=1))
+                        fontsize=11, zorder=4, linespacing=1.6, bbox=dict(boxstyle='round,pad=0.7', lw=1))
+themed_artist(popup, 'set_color', 'text')
+themed_artist(popup.get_bbox_patch(), 'set_facecolor', 'surface')
+themed_artist(popup.get_bbox_patch(), 'set_edgecolor', 'border')
 
 ax_top = fig.add_axes((0, 0.935, 1, 0.065))
 ax_top.axis('off')
-ax_top.add_patch(FancyBboxPatch((0, 0), 1, 1, boxstyle='square', fc='white', ec='none', transform=ax_top.transAxes))
-ax_top.plot([0, 1], [0, 0], color=LINE, lw=1, transform=ax_top.transAxes)
-ax_top.text(0.018, 0.5, "⌂", fontsize=18, color=BLUE, va='center', transform=ax_top.transAxes)
-ax_top.text(0.042, 0.5, "BOLIGPRISER BERGEN", fontsize=12, weight='bold', color=TEXT, va='center', transform=ax_top.transAxes)
-ax_top.add_patch(FancyBboxPatch((0.33, 0.22), 0.34, 0.56, boxstyle='round,pad=0,rounding_size=0.12',
-                                fc='#f5f7fa', ec=BORDER, lw=1, transform=ax_top.transAxes, mutation_aspect=0.25))
-ax_top.text(0.345, 0.5, "Klikk på kartet for å estimere boligpris", fontsize=10, color=MUTED, va='center', transform=ax_top.transAxes)
-ax_top.text(0.982, 0.5, "DAT · Semesteroppgave 2026", fontsize=9, color=MUTED, va='center', ha='right', transform=ax_top.transAxes)
+top_bar = ax_top.add_patch(FancyBboxPatch((0, 0), 1, 1, boxstyle='square', ec='none', transform=ax_top.transAxes))
+themed_artist(top_bar, 'set_facecolor', 'surface')
+themed_artist(ax_top.plot([0, 1], [0, 0], lw=1, transform=ax_top.transAxes)[0], 'set_color', 'line')
+themed_artist(ax_top.text(0.018, 0.5, "⌂", fontsize=18, va='center', transform=ax_top.transAxes), 'set_color', 'accent')
+themed_artist(ax_top.text(0.042, 0.5, "BOLIGPRISER BERGEN", fontsize=12, weight='bold', va='center',
+                          transform=ax_top.transAxes), 'set_color', 'text')
+themed_artist(ax_top.text(0.5, 0.5, "Klikk på kartet for å estimere boligpris", fontsize=10, ha='center', va='center',
+                          transform=ax_top.transAxes), 'set_color', 'muted')
+themed_artist(ax_top.text(0.872, 0.5, "DAT · Semesteroppgave 2026", fontsize=9, va='center', ha='right',
+                          transform=ax_top.transAxes), 'set_color', 'muted')
+
+ax_theme = fig.add_axes((0.882, 0.948, 0.103, 0.04))
+button_theme = Button(ax_theme, "")
+button_theme.label.set_fontsize(9.5)
+for spine in ax_theme.spines.values():
+    themed_artist(spine, 'set_edgecolor', 'border')
 
 L, B, W, H = 0.725, 0.035, 0.255, 0.87
-fig.patches.append(FancyBboxPatch((L + 0.002, B - 0.004), W, H, boxstyle='round,pad=0,rounding_size=0.01',
-                                  transform=fig.transFigure, fc='black', alpha=0.08, ec='none', zorder=5))
-fig.patches.append(FancyBboxPatch((L, B), W, H, boxstyle='round,pad=0,rounding_size=0.01',
-                                  transform=fig.transFigure, fc='white', ec=BORDER, lw=1, zorder=6))
+card_shadow = FancyBboxPatch((L + 0.002, B - 0.004), W, H, boxstyle='round,pad=0,rounding_size=0.01',
+                             transform=fig.transFigure, fc='black', ec='none', zorder=5)
+card = FancyBboxPatch((L, B), W, H, boxstyle='round,pad=0,rounding_size=0.01',
+                      transform=fig.transFigure, lw=1, zorder=6)
+fig.patches += [card_shadow, card]
+themed_artist(card, 'set_facecolor', 'surface')
+themed_artist(card, 'set_edgecolor', 'border')
 
 def card_line(y):
-    fig.add_artist(plt.Line2D([L, L + W], [y, y], color=LINE, lw=1, zorder=7))
+    line = plt.Line2D([L, L + W], [y, y], lw=1, zorder=7)
+    fig.add_artist(themed_artist(line, 'set_color', 'line'))
 
-def card_text(x, y, s, **kwargs):
-    return fig.text(x, y, s, zorder=7, **kwargs)
+def card_text(x, y, s, role, **kwargs):
+    return themed_artist(fig.text(x, y, s, zorder=7, **kwargs), 'set_color', role)
 
-card_text(L + W / 2, 0.855, "Prisoversikt", ha='center', fontsize=13, weight='bold', color=TEXT)
-txt_price = card_text(L + W / 2, 0.78, "", ha='center', fontsize=22, weight='bold', color=BLUE)
-txt_choice = card_text(L + W / 2, 0.75, "", ha='center', fontsize=9, color=MUTED)
+card_text(L + W / 2, 0.855, "Prisoversikt", 'text', ha='center', fontsize=13, weight='bold')
+txt_price = card_text(L + W / 2, 0.78, "", 'accent', ha='center', fontsize=22, weight='bold')
+txt_choice = card_text(L + W / 2, 0.75, "", 'muted', ha='center', fontsize=9)
 card_line(0.73)
-card_text(L + 0.02, 0.70, "●", fontsize=9, color='#2ecc71')
-txt_area = card_text(L + 0.037, 0.70, "", fontsize=10.5, color=TEXT)
-txt_coords = card_text(L + W - 0.02, 0.70, "", ha='right', fontsize=9, color=MUTED)
+fig.text(L + 0.02, 0.70, "●", fontsize=9, color='#2ecc71', zorder=7)
+txt_area = card_text(L + 0.037, 0.70, "", 'text', fontsize=10.5)
+txt_coords = card_text(L + W - 0.02, 0.70, "", 'muted', ha='right', fontsize=9)
 card_line(0.68)
-card_text(L + 0.02, 0.65, "Totalpris", fontsize=9.5, color=MUTED)
-txt_total = card_text(L + W - 0.02, 0.65, "", ha='right', fontsize=11.5, weight='bold', color=TEXT)
+txt_total_label = card_text(L + 0.02, 0.65, "", 'muted', fontsize=9.5)
+txt_total = card_text(L + W - 0.02, 0.65, "", 'text', ha='right', fontsize=11.5, weight='bold')
 card_line(0.63)
-card_text(L + 0.02, 0.60, "Boligtype", fontsize=9.5, color=MUTED)
-card_text(L + W / 2 + 0.01, 0.60, "Standard", fontsize=9.5, color=MUTED)
+card_text(L + 0.02, 0.60, "Boligtype", 'muted', fontsize=9.5)
+card_text(L + W / 2 + 0.01, 0.60, "Standard", 'muted', fontsize=9.5)
 
 ax_radio_house_type = fig.add_axes((L + 0.01, 0.465, W / 2 - 0.01, 0.125))
 ax_radio_standard = fig.add_axes((L + W / 2, 0.435, W / 2 - 0.01, 0.155))
 for ax in (ax_radio_house_type, ax_radio_standard):
     ax.set_zorder(8)
-    ax.set_facecolor('white')
+    themed_artist(ax, 'set_facecolor', 'surface')
     for spine in ax.spines.values():
         spine.set_visible(False)
 
-radio_button_category = RadioButtons(ax_radio_house_type, list(house_types.keys()), activecolor=BLUE,
+radio_button_category = RadioButtons(ax_radio_house_type, list(house_types.keys()),
                                      radio_props={'s': [80] * len(house_types), 'edgecolor': '#9aa5b1'})
-radio_button_standard = RadioButtons(ax_radio_standard, list(standard_types.keys()), activecolor=BLUE,
+radio_button_standard = RadioButtons(ax_radio_standard, list(standard_types.keys()),
                                      radio_props={'s': [80] * len(standard_types), 'edgecolor': '#9aa5b1'})
 for radio in (radio_button_category, radio_button_standard):
     for label in radio.labels:
         label.set_fontsize(10)
-        label.set_color(TEXT)
+        themed_artist(label, 'set_color', 'text')
 radio_button_category.on_clicked(on_house_type)
 radio_button_standard.on_clicked(on_standard)
 card_line(0.425)
 
-card_text(L + 0.02, 0.39, "Pris per m² etter størrelse", fontsize=9.5, color=MUTED)
+card_text(L + 0.02, 0.39, "Pris per m² etter størrelse (klikk for å velge)", 'muted', fontsize=9.5)
 ax_bars = fig.add_axes((L + 0.02, 0.075, W - 0.04, 0.29))
 ax_bars.set_zorder(8)
 
-draw_the_map()
+def apply_theme():
+    for artist, method, role in themed:
+        getattr(artist, method)(theme[role])
+    fig.set_facecolor(theme['surface'])
+    card_shadow.set_alpha(theme['shadow'])
+    veil[..., :3] = theme['veil']
+    veil[..., 3] = np.where(outside_model, theme['dim_outside'], theme['dim_inside'])
+    veil_image.set_data(veil)
+    for radio in (radio_button_category, radio_button_standard):
+        radio.activecolor = theme['accent']
+    button_theme.label.set_text("☀  Lys modus" if theme_name == 'dark' else "☾  Mørk modus")
+    button_theme.label.set_color(theme['text'])
+    button_theme.color, button_theme.hovercolor = theme['surface'], theme['hover']
+    ax_theme.set_facecolor(theme['surface'])
+    draw_the_map()
+
+def on_toggle_theme(event):
+    global theme_name, theme
+    theme_name = 'dark' if theme_name == 'light' else 'light'
+    theme = THEMES[theme_name]
+    apply_theme()
+
+button_theme.on_clicked(on_toggle_theme)
+
+apply_theme()
 fig.canvas.mpl_connect('button_press_event', on_click_map)
+fig.canvas.mpl_connect('button_press_event', on_click_bars)
 plt.show()
