@@ -1,4 +1,7 @@
 import math
+import sys
+import ctypes
+import tkinter as tk
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -8,6 +11,8 @@ import matplotlib.image as mpimg
 from Semester26_Model import predict_price
 
 MAP_FILE = 'Semester26_Bergen_kart.jpg'
+LOGO_FILE = 'Semester26_Logo.png'
+ICON_FILE = 'Semester26_Ikon.png'
 MAP_EXTENT = (546060.5, 676038.0, 8443625.0, 8522539.9)
 MERC_TO_MODEL = [[0.001804877605, -0.0001861719251],
                  [0.0002655721006, 0.001261065026],
@@ -150,8 +155,17 @@ def themed_artist(artist, method, role):
 plt.rcParams['font.family'] = ['Segoe UI', 'DejaVu Sans']
 plt.rcParams['toolbar'] = 'None'
 
+if sys.platform == 'win32':
+    
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Semesteroppgave.BoligpriserBergen')
+
 fig = plt.figure(figsize=(12.0, 7.3))
 fig.canvas.manager.set_window_title("Boligpriser Bergen")
+window = getattr(fig.canvas.manager, 'window', None)
+if isinstance(window, tk.Tk):
+    app_icon = tk.PhotoImage(master=window, file=ICON_FILE)
+    app_icon_small = app_icon.subsample(8)
+    window.iconphoto(False, app_icon, app_icon_small)
 
 ax_map = fig.add_axes((0, 0, 1, 1))
 img = mpimg.imread(MAP_FILE)
@@ -183,8 +197,10 @@ ax_top.axis('off')
 top_bar = ax_top.add_patch(FancyBboxPatch((0, 0), 1, 1, boxstyle='square', ec='none', transform=ax_top.transAxes))
 themed_artist(top_bar, 'set_facecolor', 'surface')
 themed_artist(ax_top.plot([0, 1], [0, 0], lw=1, transform=ax_top.transAxes)[0], 'set_color', 'line')
-themed_artist(ax_top.text(0.018, 0.5, "⌂", fontsize=18, va='center', transform=ax_top.transAxes), 'set_color', 'accent')
-themed_artist(ax_top.text(0.042, 0.5, "BOLIGPRISER BERGEN", fontsize=12, weight='bold', va='center',
+ax_logo = fig.add_axes((0.017, 0.9613, 0.0249, 0.022))
+ax_logo.imshow(mpimg.imread(LOGO_FILE), interpolation='antialiased')
+ax_logo.axis('off')
+themed_artist(ax_top.text(0.048, 0.5, "BOLIGPRISER BERGEN", fontsize=12, weight='bold', va='center',
                           transform=ax_top.transAxes), 'set_color', 'text')
 themed_artist(ax_top.text(0.5, 0.5, "Klikk på kartet for å estimere boligpris", fontsize=10, ha='center', va='center',
                           transform=ax_top.transAxes), 'set_color', 'muted')
