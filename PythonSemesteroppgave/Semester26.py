@@ -7,12 +7,16 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.widgets import RadioButtons, Button
 from matplotlib.patches import FancyBboxPatch, Circle
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+from matplotlib.colors import to_rgb
 import matplotlib.image as mpimg
 from Semester26_Model import predict_price
 
 MAP_FILE = 'Semester26_Bergen_kart.jpg'
 LOGO_FILE = 'Semester26_Logo.png'
 ICON_FILE = 'Semester26_Ikon.png'
+SUN_FILE = 'Semester26_Sol.png'
+MOON_FILE = 'Semester26_Maane.png'
 MAP_EXTENT = (546060.5, 676038.0, 8443625.0, 8522539.9)
 MERC_TO_MODEL = [[0.001804877605, -0.0001861719251],
                  [0.0002655721006, 0.001261065026],
@@ -210,6 +214,16 @@ themed_artist(ax_top.text(0.872, 0.5, "DAT · Semesteroppgave 2026", fontsize=9,
 ax_theme = fig.add_axes((0.882, 0.948, 0.103, 0.04))
 button_theme = Button(ax_theme, "")
 button_theme.label.set_fontsize(9.5)
+button_theme.label.set_position((0.6, 0.5))
+theme_icons = {'light': mpimg.imread(MOON_FILE), 'dark': mpimg.imread(SUN_FILE)}
+theme_icon = OffsetImage(theme_icons['light'], zoom=0.26)
+ax_theme.add_artist(AnnotationBbox(theme_icon, (0.17, 0.5), xycoords='axes fraction', frameon=False))
+
+def tint_icon(icon, color):
+    tinted = np.zeros_like(icon)
+    tinted[..., :3] = to_rgb(color)
+    tinted[..., 3] = icon[..., 3]
+    return tinted
 for spine in ax_theme.spines.values():
     themed_artist(spine, 'set_edgecolor', 'border')
 
@@ -277,7 +291,8 @@ def apply_theme():
     veil_image.set_data(veil)
     for radio in (radio_button_category, radio_button_standard):
         radio.activecolor = theme['accent']
-    button_theme.label.set_text("☀  Lys modus" if theme_name == 'dark' else "☾  Mørk modus")
+    button_theme.label.set_text("Lys modus" if theme_name == 'dark' else "Mørk modus")
+    theme_icon.set_data(tint_icon(theme_icons[theme_name], theme['text']))
     button_theme.label.set_color(theme['text'])
     button_theme.color, button_theme.hovercolor = theme['surface'], theme['hover']
     ax_theme.set_facecolor(theme['surface'])
