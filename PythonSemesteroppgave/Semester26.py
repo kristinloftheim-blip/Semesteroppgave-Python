@@ -208,8 +208,6 @@ themed_artist(ax_top.text(0.048, 0.5, "BOLIGPRISER BERGEN", fontsize=12, weight=
                           transform=ax_top.transAxes), 'set_color', 'text')
 themed_artist(ax_top.text(0.5, 0.5, "Klikk på kartet for å estimere boligpris", fontsize=10, ha='center', va='center',
                           transform=ax_top.transAxes), 'set_color', 'muted')
-themed_artist(ax_top.text(0.872, 0.5, "DAT · Semesteroppgave 2026", fontsize=9, va='center', ha='right',
-                          transform=ax_top.transAxes), 'set_color', 'muted')
 
 ax_theme = fig.add_axes((0.882, 0.948, 0.103, 0.04))
 button_theme = Button(ax_theme, "")
