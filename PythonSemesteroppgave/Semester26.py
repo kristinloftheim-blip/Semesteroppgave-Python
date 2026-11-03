@@ -9,6 +9,7 @@ from matplotlib.widgets import RadioButtons, Button
 from matplotlib.patches import FancyBboxPatch, Circle
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from matplotlib.colors import to_rgb
+from matplotlib.transforms import Affine2D
 import matplotlib.image as mpimg
 from Semester26_Model import predict_price
 
@@ -25,6 +26,21 @@ MERC_TO_MODEL = [[0.001804877605, -0.0001861719251],
 def merc_to_model(mx, my):
     (a, b), (c, d), (e, f) = MERC_TO_MODEL
     return a * mx + c * my + e, b * mx + d * my + f
+
+(_a, _b), (_c, _d), _ = MERC_TO_MODEL
+VIEW_ANGLE = math.atan2(-_b, _d)
+VIEW_CENTER = ((MAP_EXTENT[0] + MAP_EXTENT[1]) / 2, (MAP_EXTENT[2] + MAP_EXTENT[3]) / 2)
+VIEW_W, VIEW_H = MAP_EXTENT[1] - MAP_EXTENT[0], MAP_EXTENT[3] - MAP_EXTENT[2]
+VIEW_EXTENT = (-VIEW_W / 2, VIEW_W / 2, -VIEW_H / 2, VIEW_H / 2)
+
+def merc_to_view(mx, my):
+    dx, dy = mx - VIEW_CENTER[0], my - VIEW_CENTER[1]
+    cos, sin = math.cos(VIEW_ANGLE), math.sin(VIEW_ANGLE)
+    return cos * dx + sin * dy, -sin * dx + cos * dy
+
+def view_to_merc(vx, vy):
+    cos, sin = math.cos(VIEW_ANGLE), math.sin(VIEW_ANGLE)
+    return VIEW_CENTER[0] + cos * vx - sin * vy, VIEW_CENTER[1] + sin * vx + cos * vy
 
 def is_inside_model(x, y):
     return 0 <= x <= 100 and 4.8 <= y <= 100
@@ -49,9 +65,10 @@ def fmt(value):
 def draw_the_map():
     mx, my = marked_point
     x, y = merc_to_model(mx, my)
-    marker.set_offsets([[mx, my]])
-    halo.center = (mx, my)
-    popup.xy = (mx, my)
+    vx, vy = merc_to_view(mx, my)
+    marker.set_offsets([[vx, vy]])
+    halo.center = (vx, vy)
+    popup.xy = (vx, vy)
 
     house_name = [k for k, v in house_types.items() if v == house_type][0]
     standard_name = [k for k, v in standard_types.items() if v == standard_type][0]
@@ -100,7 +117,7 @@ def on_click_map(event):
     fx, fy = fig.transFigure.inverted().transform((event.x, event.y))
     if L <= fx <= L + W and B <= fy <= B + H:
         return
-    marked_point = (event.xdata, event.ydata)
+    marked_point = view_to_merc(event.xdata, event.ydata)
     draw_the_map()
 
 def on_click_bars(event):
@@ -173,24 +190,53 @@ if isinstance(window, tk.Tk):
 
 ax_map = fig.add_axes((0, 0, 1, 1))
 img = mpimg.imread(MAP_FILE)
-ax_map.imshow(img, extent=MAP_EXTENT, interpolation='antialiased')
-ax_map.axis('off')
+map_rotation = Affine2D().translate(-VIEW_CENTER[0], -VIEW_CENTER[1]).rotate(-VIEW_ANGLE)
+ax_map.imshow(img, extent=MAP_EXTENT, interpolation='antialiased', transform=map_rotation + ax_map.transData)
+ax_map.set_xticks([])
+ax_map.set_yticks([])
+for spine in ax_map.spines.values():
+    spine.set_visible(False)
+themed_artist(ax_map, 'set_facecolor', 'surface')
 
-gx, gy = np.meshgrid(np.linspace(MAP_EXTENT[0], MAP_EXTENT[1], 900),
-                     np.linspace(MAP_EXTENT[2], MAP_EXTENT[3], 550))
-model_x, model_y = merc_to_model(gx, gy)
+gx, gy = np.meshgrid(np.linspace(VIEW_EXTENT[0], VIEW_EXTENT[1], 900),
+                     np.linspace(VIEW_EXTENT[2], VIEW_EXTENT[3], 550))
+grid_mx, grid_my = view_to_merc(gx, gy)
+model_x, model_y = merc_to_model(grid_mx, grid_my)
 outside_model = ~is_inside_model_grid(model_x, model_y)
+map_margin = np.minimum.reduce([grid_mx - MAP_EXTENT[0], MAP_EXTENT[1] - grid_mx,
+                                grid_my - MAP_EXTENT[2], MAP_EXTENT[3] - grid_my])
+zone_without_map = ~outside_model & (map_margin < 0)
+if (zone_without_map & (gy < 0)).any():
+    outside_model |= gy <= gy[zone_without_map & (gy < 0)].max()
+if (zone_without_map & (gy > 0)).any():
+    outside_model |= gy >= gy[zone_without_map & (gy > 0)].min()
 veil = np.ones((*gx.shape, 4))
-veil_image = ax_map.imshow(veil, extent=MAP_EXTENT, origin='lower', interpolation='bilinear', zorder=1)
-ax_map.set_xlim(MAP_EXTENT[0], MAP_EXTENT[1])
-ax_map.set_ylim(MAP_EXTENT[2], MAP_EXTENT[3])
+veil_image = ax_map.imshow(veil, extent=VIEW_EXTENT, origin='lower', interpolation='bilinear', zorder=1)
+
+ZONE_FADE, MAP_EDGE_FADE = 18000, 6000
+zone_u, zone_v = gx[~outside_model], gy[~outside_model]
+dist_u = np.maximum(np.maximum(zone_u.min() - gx, gx - zone_u.max()), 0)
+dist_v = np.maximum(np.maximum(zone_v.min() - gy, gy - zone_v.max()), 0)
+edge_fade = np.maximum(np.clip(np.hypot(dist_u, dist_v) / ZONE_FADE, 0, 1),
+                       1 - np.clip(map_margin / MAP_EDGE_FADE, 0, 1))
+edge_fade[~outside_model] = 0
+fade = np.ones((*gx.shape, 4))
+fade_image = ax_map.imshow(fade, extent=VIEW_EXTENT, origin='lower', interpolation='bilinear', zorder=1)
+TOP_BAR_Y = 0.935
+fig_w, fig_h = fig.get_size_inches()
+view_h = (zone_v.max() - zone_v.min()) / TOP_BAR_Y
+view_w = view_h * fig_w / fig_h
+zone_center_u = (zone_u.min() + zone_u.max()) / 2
+zone_center_frac = (zone_center_u - VIEW_EXTENT[0]) / VIEW_W
+ax_map.set_xlim(zone_center_u - zone_center_frac * view_w, zone_center_u + (1 - zone_center_frac) * view_w)
+ax_map.set_ylim(zone_v.min(), zone_v.min() + view_h)
 themed_artist(fig.text(0.006, 0.01, "© Kartverket", fontsize=7), 'set_color', 'muted')
 
-halo = themed_artist(Circle(marked_point, 1800, alpha=0.15, lw=1, zorder=2), 'set_color', 'accent')
+halo = themed_artist(Circle(merc_to_view(*marked_point), 1800, alpha=0.15, lw=1, zorder=2), 'set_color', 'accent')
 ax_map.add_patch(halo)
-marker = themed_artist(ax_map.scatter(*marked_point, s=140, edgecolors='white', linewidths=2.5, zorder=3),
+marker = themed_artist(ax_map.scatter(*merc_to_view(*marked_point), s=140, edgecolors='white', linewidths=2.5, zorder=3),
                        'set_facecolor', 'accent')
-popup = ax_map.annotate("", marked_point, xytext=(24, -8), textcoords='offset points', va='top',
+popup = ax_map.annotate("", merc_to_view(*marked_point), xytext=(24, -8), textcoords='offset points', va='top',
                         fontsize=11, zorder=4, linespacing=1.6, bbox=dict(boxstyle='round,pad=0.7', lw=1))
 themed_artist(popup, 'set_color', 'text')
 themed_artist(popup.get_bbox_patch(), 'set_facecolor', 'surface')
@@ -287,6 +333,9 @@ def apply_theme():
     veil[..., :3] = theme['veil']
     veil[..., 3] = np.where(outside_model, theme['dim_outside'], theme['dim_inside'])
     veil_image.set_data(veil)
+    fade[..., :3] = to_rgb(theme['surface'])
+    fade[..., 3] = edge_fade
+    fade_image.set_data(fade)
     for radio in (radio_button_category, radio_button_standard):
         radio.activecolor = theme['accent']
     button_theme.label.set_text("Lys modus" if theme_name == 'dark' else "Mørk modus")
