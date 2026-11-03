@@ -82,12 +82,20 @@ def draw_the_map():
     bars = ax_bars.bar([f"{_m2} m²" for _m2 in m2list], price_m2, color=colors, width=0.55)
     ax_bars.bar_label(bars, labels=[f"{p / 1000:.0f}k" for p in price_m2], fontsize=9, color=theme['text'], padding=3)
     ax_bars.set_ylim(0, max(price_m2) * 1.2)
+    ref = price_m2[m2list.index(100)]  # kr/m² for 100 m²
+    ax_bars.axhline(ref, color=theme['text'], linestyle='--', linewidth=1.2, zorder=3)
+    ax_bars.text(0.99, ref, f"100 m²: {ref / 1000:.0f}k",
+                 transform=ax_bars.get_yaxis_transform(),
+                 ha='right', va='bottom', fontsize=8, color=theme['muted'])
     style_bars()
     fig.canvas.draw_idle()
 
 def style_bars():
     ax_bars.set_facecolor(theme['surface'])
-    ax_bars.set_yticks([])
+    ax_bars.grid(axis='y', color=theme['line'], linewidth=0.8)
+    ax_bars.set_axisbelow(True)
+    ax_bars.tick_params(axis='y', length=0, labelsize=8, colors=theme['muted'])
+    ax_bars.yaxis.set_major_formatter(lambda v, pos: f"{v / 1000:.0f}k")
     ax_bars.tick_params(axis='x', length=0, labelsize=9, colors=theme['muted'])
     for side in ('top', 'right', 'left'):
         ax_bars.spines[side].set_visible(False)

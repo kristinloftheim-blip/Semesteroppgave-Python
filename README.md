@@ -40,7 +40,7 @@ Forslag til forbedringer
 		o Grønn = god standard
 
 
-3. Legg til referanselinje og grid
+3. Legg til referanselinje og grid - ferdig
 
 	• Legg inn en horisontal strek i stolpediagrammet som markerer verdien for et hus på 100 m² (i eksemplet: 31000).
 
